@@ -23,6 +23,16 @@
 #include "ray.h"
 #include "sphere.h"
 
+
+#include <omp.h>
+#include <thread>
+
+void explainOMP(std::string a)
+{
+    std::cout << "Thread number: " << omp_get_thread_num()<<" "<<a<<std::endl;
+}
+
+
 #pragma region PNG
 void encodeOneStep(const char* filename, std::vector<unsigned char>& image, unsigned width, unsigned height) {
 	//Encode the image
@@ -44,34 +54,35 @@ color ray_color(const ray& r, const hittable_list& world, int depth, bool scatte
         color attenuation;
         color finalCol;
         color shadowing;
-        for (PointLight l : world.lights)
-        {
-            bool blocked_by_all = true;
-            hit_record shadowRec;
-            ray shadow_ray(rec.p + (rec.normal * 1e-4), l.lightDirection);
-
-            if (world.hit(shadow_ray, 0.001, infinity, shadowRec))
-            {
-                shouldLight.push_back(false);
-            }
-            else { shouldLight.push_back(true); blocked_by_all = false; }
-            shadowing = blocked_by_all ? Black : White;
-
-        }
+       // std::cout << omp_get_num_threads()<<std::endl;
+		//#pragma openmp parallel for
         
-        if (rec.mat_ptr->scatter(r, rec, attenuation, scattered,world.lights, shouldLight))
-        {
-            if (scattering)
-                finalCol= attenuation * ray_color(scattered, world, depth - 1);
-            else
-                finalCol= attenuation;
-        	return finalCol*shadowing;
-        }
-    	return color(0, 0, 0);
-    }
+            for (PointLight l : world.lights)
+            {
+                bool blocked_by_all = true;
+                hit_record shadowRec;
+                ray shadow_ray(rec.p + (rec.normal * 1e-4), l.lightDirection);
 
-    vec3 unit_direction = unit_vector(r.direction());
-    auto t = 0.5 * (unit_direction.y() + 1.0);
+                if (world.hit(shadow_ray, 0.001, infinity, shadowRec))
+                {
+                    shouldLight.push_back(false);
+                }
+                else { shouldLight.push_back(true); blocked_by_all = false; }
+                shadowing = blocked_by_all ? Black : White;
+            }
+    
+            if (rec.mat_ptr->scatter(r, rec, attenuation, scattered, world.lights, shouldLight))
+            {
+                if (scattering)
+                    finalCol = attenuation * ray_color(scattered, world, depth - 1);
+                else
+                    finalCol = attenuation;
+                return finalCol;
+            }
+            return color(0, 0, 0);
+        }
+    //vec3 unit_direction = unit_vector(r.direction());
+    //auto t = 0.5 * (unit_direction.y() + 1.0);
     return color(0.5, 0.7, 1.0);
 }
 
@@ -94,122 +105,58 @@ hittable_list random_scene() {
     world.lights.push_back(l1);
     //world.lights.push_back(l2);
 
-
-	/*
-    for (int a = -11; a < 11; a++) {
-        for (int b = -11; b < 11; b++) {
-            auto choose_mat = random_double();
-            point3 center(a + 0.9 * random_double(), 0.2, b + 0.9 * random_double());
-
-            if ((center - point3(4, 0.2, 0)).length() > 0.9) {
-                shared_ptr<material> sphere_material;
-
-                if (choose_mat < 0.8) {
-                    // diffuse
-                    auto albedo = color::random() * color::random();
-                    sphere_material = make_shared<lambertian>(albedo);
-                    world.add(make_shared<sphere>(center, 0.2, sphere_material));
-                }
-                else if (choose_mat < 0.95) {
-                    // metal
-                    auto albedo = color::random(0.5, 1);
-                    auto fuzz = random_double(0, 0.5);
-                    sphere_material = make_shared<metal>(albedo, fuzz);
-                    world.add(make_shared<sphere>(center, 0.2, sphere_material));
-                }
-                else {
-                    // glass
-                    sphere_material = make_shared<dielectric>(1.5);
-                    world.add(make_shared<sphere>(center, 0.2, sphere_material));
-                }
-            }
-        }
-    }*/
-
-    //auto material1 = make_shared<dielectric>(1.5);
-    //world.add(make_shared<sphere>(point3(0, 1, 0), 1, material1));
-
-    //auto material2 = make_shared<lambertian>(color(0.4, 0.2, 0.1));
-    //world.add(make_shared<sphere>(point3(-4, 1, 0), 1, material2));
-    /*
-    auto material4 = make_shared<lambert>(color(1, 0, 0),0.5,64);
-    auto material5 = make_shared<lambert>(color(0, 0, 1),0.5,64);
-    auto material6 = make_shared<lambert>(color(1, 1, 0),0.7,64);
-    auto material3 = make_shared<metal>(color(0.7, 0.6, 0.5), 0.0);
-    world.add(make_shared<sphere>(point3(4, 1, 0), 1, material4));
-    world.add(make_shared<sphere>(point3(-4, 1, 0), 1, material5));
-    world.add(make_shared<sphere>(point3(0, 1, 0), 1, material6));
-    */
-
     double diff=0.35;
-    double spec=32;
-    auto john = make_shared<lambert>(Brown, diff, spec);
-	auto mary = make_shared<lambert>(color(0.52, 0.8, 0.91), diff, spec);
-	auto angel = make_shared<lambert>(color(0.7,0.7,0.7), diff, spec);
-	auto jesus = make_shared<lambert>(White, diff, spec);
-	auto king1 = make_shared<lambert>(Red, diff, spec);
-	auto king2 = make_shared<lambert>(Green, diff , spec);
-	auto king3 = make_shared<lambert>(Blue, diff, spec);
+    double spec=128;
+    auto brown = make_shared<lambert>(Brown, diff, spec);
 
-    //world.add(make_shared<sphere>(point3(-0.1, 2, 4.7), 2, jesus));
-    world.add(make_shared<sphere>(point3(-4, 4, 0), 4, john));
-    //world.add(make_shared<sphere>(point3(3.2, 3, 0.5), 3, mary));
-    //world.add(make_shared<sphere>(point3(13, 4, 3.4 - 4 * 2.4), 4, king1));
-    //world.add(make_shared<sphere>(point3(13+4*2, 4, 3.4-4*1.2), 4, king2));
-    //world.add(make_shared<sphere>(point3(13+4*4, 4, 3.4), 4, king3));
-    //world.add(make_shared<sphere>(point3(-16, 2.5, 1.3), 2.5, angel));
+    world.add(make_shared<sphere>(point3(-4, 4, 0), 4, brown));
 
 
 
     return world;
 }
 
-int main()
+/*
+std::atomic<int> tile = 100; // assuming 100 tiles
+void RenderImage() {
+    const int numThreads = 4;
+    std::thread* thread[numThreads];
+    for (int i = 0; i < 4; i++)
+        thread[i] = new std::thread(ThreadFunction);
+    for (int i = 0; i < 4; i++)
+        thread[i]->join();
+}
+void ThreadFunction() {
+    while (1) {
+        int tileNum = tile--;
+        if (tileNum <= 0) return;
+        // Render tile ‘tileNum’ and store data in ‘image’
+    }
+}
+*/
+
+auto world = random_scene();
+
+
+void renderTile(int tno, int totaltiles, int image_width, int image_height, camera cam, std::vector<unsigned char> &image, int samples_per_pixel, int max_depth, int th, int tw)
 {
-	//generate image
-	const char* filename = "out1.png";
-	std::vector<unsigned char> image;
-	const auto aspect_ratio = 1;
-	const int image_width = 1024/2;
-	const int image_height = static_cast<int>(image_width / aspect_ratio);
-	int total = image_width * image_height;
-    const int samples_per_pixel = 10;
-    const int max_depth = 10;
-	//image resizing
-	image.resize(image_width * image_height * 4);
-
-    // World
-
-    auto world = random_scene();
-    // Camera
-    
-    point3 lookfrom(6, 75, 150);
-    //point3 lookfrom(1, 2, 18);
-    point3 lookat(6, 1, 0);
-    vec3 vup(0, 1, 0);
-    auto dist_to_focus = 100.0;
-    auto aperture = 0.1;
-
-    camera cam(lookfrom, lookat, vup, 20, aspect_ratio, aperture, dist_to_focus);
-
-	color defaultColor=Blue;
-	for (unsigned y = image_height - 1; y >0; y--)
-	{
-		for (unsigned x = 0; x < image_width; x++) 
+    int t = tno;//tile number
+    int ytno = t / totaltiles + 1;
+    int xtno = t % totaltiles + 1;
+    for (unsigned y = ytno * th ; y > (ytno - 1) * th; y--)
+    {
+        for (unsigned x = (xtno - 1) * tw; x < tw * xtno; x++)
         {
             color col(0, 0, 0);
             for (int s = 0; s < samples_per_pixel; ++s) {
-				auto u = (x + random_double()) / (image_width - 1);
-				auto v = (y + random_double()) / (image_height - 1);
-
-				ray ra = cam.get_ray_perspective(u, v);
-				col += ray_color(ra, world, max_depth);
-
+                auto u = (x + random_double()) / (image_width - 1);
+                auto v = (y + random_double()) / (image_width - 1);
+                ray ra = cam.get_ray_perspective(u, v);
+                col += ray_color(ra, world, max_depth);
             }
-            
-
+            //std::cout << std::endl<<col;
 #pragma region Image File Color Translation
-			//conversion to unsigned char
+            //conversion to unsigned char
             auto scale = 1.0 / samples_per_pixel;
             auto r = col.x();
             auto g = col.y();
@@ -218,29 +165,138 @@ int main()
             g = sqrt(scale * g);
             b = sqrt(scale * b);
 
-			const unsigned char rf = static_cast<unsigned char>(std::min(1., r) * 255);
-			const unsigned char gf = static_cast<unsigned char>(std::min(1., g) * 255);
-			const unsigned char bf = static_cast<unsigned char>(std::min(1., b) * 255);
+            const unsigned char rf = static_cast<unsigned char>(std::min(1., r) * 255);
+            const unsigned char gf = static_cast<unsigned char>(std::min(1., g) * 255);
+            const unsigned char bf = static_cast<unsigned char>(std::min(1., b) * 255);
+            int val = 4 * image_width * (image_height - y) + 4 * x;
+            //allot color
+            image[val + 0] = rf;
+            image[val + 1] = gf;
+            image[val + 2] = bf;
+            image[val + 3] = 255;//alpha
+#pragma endregion
+        }
+    }
+}
 
-			//allot color
-			int val = 4 * image_width * (image_height- y) + 4 * x;
-			image[val + 0] = rf;
-			image[val + 1] = gf;
-			image[val + 2] = bf;
-			image[val + 3] = 255;//alpha
+int main()
+{
+    //openmp set up
+    double startTime = omp_get_wtime();
+    omp_set_nested(1);
+    omp_set_num_threads(8);
+
+   // std::cout << omp_get_num_threads();
+	//generate image
+	
+    const char* filename = "out1.png";
+    std::vector<unsigned char> image;
+    const auto aspect_ratio = 1;
+    const int image_width = 512;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    int total = image_width * image_height;
+    const int samples_per_pixel = 20;
+    const int max_depth = 10;
+    //image resizing
+    image.resize(image_width * image_height * 4);
+
+    // World
+
+    // Camera
+    
+    point3 lookfrom(6, 20, 50);
+    point3 lookat(-4, 4, 0);
+    vec3 vup(0, 1, 0);
+    auto dist_to_focus = 100.0;
+    auto aperture = 0.1;
+
+    camera cam(lookfrom, lookat, vup, 20, aspect_ratio, aperture, dist_to_focus);
+
+	color defaultColor=Blue;
+
+    
+                
+    int numberOfTiles = 128;
+    int th = image_height / numberOfTiles;
+    int tw = image_width / numberOfTiles;
+    startTime = omp_get_wtime();
+	#pragma omp parallel
+    {
+		#pragma omp single nowait
+        {
+            for (int i = 0; i < numberOfTiles*numberOfTiles; i++) { 
+				#pragma omp task
+                {
+                    renderTile(i, numberOfTiles, image_width, image_height, cam, image, samples_per_pixel, max_depth, th,tw);
+                }
+            }
+        }
+	#pragma omp taskwait
+    }
+    std::cout <<"parallel: " << std::endl << omp_get_wtime() - startTime;
+    	encodeOneStep("output_parallel", image, image_width, image_height);
+
+    
+
+    startTime = omp_get_wtime();
+        for (unsigned y = image_height - 1; y > 0; y--)
+        {
+            for (unsigned x = 0; x < image_width; x++)
+            {
+                color col(0, 0, 0);
+                color defaultColor(0.3, 0.5, 0.7);
+
+                for (int s = 0; s < samples_per_pixel; ++s) {
+                    auto u = (x + random_double()) / (image_width - 1);
+                    auto v = (y + random_double()) / (image_width - 1);
+                    ray ra = cam.get_ray_perspective(u, v);
+
+                    col += ray_color(ra, world, max_depth);
+
+                }
+                //std::cout << std::endl<<col;
+
+#pragma region Image File Color Translation
+            //conversion to unsigned char
+                auto scale = 1.0 / samples_per_pixel;
+                auto r = col.x();
+                auto g = col.y();
+                auto b = col.z();
+                r = sqrt(scale * r);
+                g = sqrt(scale * g);
+                b = sqrt(scale * b);
+
+                const unsigned char rf = static_cast<unsigned char>(std::min(1., r) * 255);
+                const unsigned char gf = static_cast<unsigned char>(std::min(1., g) * 255);
+                const unsigned char bf = static_cast<unsigned char>(std::min(1., b) * 255);
+                int val = 4 * image_width * (image_height - y) + 4 * x;
+                //allot color
+                //int val = 4 * image_width * (image_height- y) + 4 * x;
+                image[val + 0] = rf;
+                image[val + 1] = gf;
+                image[val + 2] = bf;
+                image[val + 3] = 255;//alpha
 #pragma endregion
 
 
+            }
+            if (y % 10 == 0)
+            {
+               // system("cls");
+               // std::cout << "Progress: " << int(100 * (double(image_height - y) / image_height)) << "%" << std::endl;
+            }
         }
-        if (y % 10 == 0)
-        {
-            system("cls");
-            std::cout <<"Progress: " << int(100 * (double(image_height - y) / image_height)) << "%" << std::endl;
-        }
-	}
-	encodeOneStep(filename, image, image_width, image_height);
+            std::cout << std::endl <<"Serial: " << omp_get_wtime() - startTime;
 
+/*
+int sum = 0;
 
+*/
+
+	encodeOneStep("output_serial", image, image_width, image_height);
+    
+
+    
 	return 0;
 }
 
