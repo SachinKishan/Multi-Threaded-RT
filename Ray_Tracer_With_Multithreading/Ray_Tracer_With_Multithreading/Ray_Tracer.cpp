@@ -53,22 +53,16 @@ color ray_color(const ray& r, const hittable_list& world, int depth, bool scatte
         ray scattered;
         color attenuation;
         color finalCol;
-        color shadowing;
-       // std::cout << omp_get_num_threads()<<std::endl;
-		//#pragma openmp parallel for
-        
             for (PointLight l : world.lights)
             {
-                bool blocked_by_all = true;
-                hit_record shadowRec;
+            	hit_record shadowRec;
                 ray shadow_ray(rec.p + (rec.normal * 1e-4), l.lightDirection);
 
                 if (world.hit(shadow_ray, 0.001, infinity, shadowRec))
                 {
                     shouldLight.push_back(false);
                 }
-                else { shouldLight.push_back(true); blocked_by_all = false; }
-                shadowing = blocked_by_all ? Black : White;
+                else { shouldLight.push_back(true); }
             }
     
             if (rec.mat_ptr->scatter(r, rec, attenuation, scattered, world.lights, shouldLight))
@@ -115,25 +109,6 @@ hittable_list random_scene() {
 
     return world;
 }
-
-/*
-std::atomic<int> tile = 100; // assuming 100 tiles
-void RenderImage() {
-    const int numThreads = 4;
-    std::thread* thread[numThreads];
-    for (int i = 0; i < 4; i++)
-        thread[i] = new std::thread(ThreadFunction);
-    for (int i = 0; i < 4; i++)
-        thread[i]->join();
-}
-void ThreadFunction() {
-    while (1) {
-        int tileNum = tile--;
-        if (tileNum <= 0) return;
-        // Render tile ‘tileNum’ and store data in ‘image’
-    }
-}
-*/
 
 auto world = random_scene();
 
