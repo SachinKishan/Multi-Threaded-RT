@@ -27,6 +27,12 @@
 #include <omp.h>
 #include <thread>
 
+#include "SDF.h"
+
+
+std::vector<shared_ptr<sdf>> sdfWorld;
+
+
 void explainOMP(std::string a)
 {
     std::cout << "Thread number: " << omp_get_thread_num()<<" "<<a<<std::endl;
@@ -42,6 +48,8 @@ void encodeOneStep(const char* filename, std::vector<unsigned char>& image, unsi
 	if (error) std::cout << "encoder error " << error << ": " << lodepng_error_text(error) << std::endl;
 }
 #pragma endregion
+
+
 
 color ray_color(const ray& r, const hittable_list& world, int depth, bool scattering=true) {
     hit_record rec;
@@ -111,8 +119,6 @@ hittable_list random_scene() {
 }
 
 auto world = random_scene();
-
-
 void renderTile(int tno, int totaltiles, int image_width, int image_height, camera cam, std::vector<unsigned char> &image, int samples_per_pixel, int max_depth, int th, int tw)
 {
     int t = tno;//tile number
@@ -154,6 +160,103 @@ void renderTile(int tno, int totaltiles, int image_width, int image_height, came
     }
 }
 
+
+double findSmallestSDFDistance(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld, shared_ptr<sdf> &hitSDF)
+{
+    double d = infinity;
+    double dOld = d;
+    for (shared_ptr<sdf> df : sdfWorld)
+    {
+        d = std::min(d, df->DistanceFunction(p));
+        
+        if (abs(dOld - d) > 0.0001){hitSDF = df;}
+    }
+    return d;
+}
+
+vec3 calcsdfNormal(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld) {
+    vec3 e = vec3(1.0, -1.0, 0) * 0.0005;
+
+    vec3 a = vec3(e.x(), e.y(), e.y());
+    vec3 b = vec3(e.y(), e.y(), e.x());
+    vec3 c = vec3(e.y(), e.x(), e.y());
+    vec3 d = vec3(e.x(), e.x(), e.x());
+    shared_ptr<sdf> dummy;
+    return normalise(
+        a * findSmallestSDFDistance(p + a, sdfWorld,dummy) +
+        b * findSmallestSDFDistance(p + b, sdfWorld,dummy) +
+        c * findSmallestSDFDistance(p + c, sdfWorld,dummy) +
+        d * findSmallestSDFDistance(p + d, sdfWorld,dummy));
+}
+
+void renderTileRayMarch(int tno, int totaltiles, int image_width, int image_height, camera cam, std::vector<unsigned char>& image, int samples_per_pixel, int max_depth, int th, int tw)
+{
+    int t = tno;//tile number
+    int ytno = t / totaltiles + 1;
+    int xtno = t % totaltiles + 1;
+    for (unsigned y = ytno * th; y > (ytno - 1) * th; y--)
+    {
+        for (unsigned x = (xtno - 1) * tw; x < tw * xtno; x++)
+        {
+            color col(0, 0, 0);
+            color raycol = Black;
+            color defaultColor(0.3, 0.5, 0.7);
+
+            for (int s = 0; s < samples_per_pixel; ++s) {
+
+                auto u = (x + random_double()) / (image_width - 1);
+                auto v = (y + random_double()) / (image_width - 1);
+                ray ra = cam.get_ray_perspective(u, v);
+                float t = 1;
+                float h = 0;
+                shared_ptr<sdf> temp;
+                for (int i = 0; i < 256; i++)
+                {
+                    vec3 pos = ra.orig + normalise(ra.dir) * t;
+                	h = findSmallestSDFDistance(pos, sdfWorld, temp);
+                    t += h;
+                    if (h < 0.0001) { raycol = temp->colorOfSDF; break; }
+                }
+                if (h < 0.0001) 
+                {
+                    vec3 pos = ra.orig + normalise(ra.dir) * t;
+                    vec3 normal = calcsdfNormal(pos, sdfWorld);
+                    vec3 light = vec3(1, 2, 3);
+                    float dif = clamp(dot(normal, normalise(light - pos)), 0., 1.);
+                    dif *= 5. / dot(light - pos, light - pos);
+                    col *= dif;
+                }
+                col += raycol;
+            }
+
+#pragma region Image File Color Translation
+            //conversion to unsigned char
+            auto scale = 1.0 / samples_per_pixel;
+            auto r = col.x();
+            auto g = col.y();
+            auto b = col.z();
+            r = sqrt(scale * r);
+            g = sqrt(scale * g);
+            b = sqrt(scale * b);
+
+            const unsigned char rf = static_cast<unsigned char>(std::min(1., r) * 255);
+            const unsigned char gf = static_cast<unsigned char>(std::min(1., g) * 255);
+            const unsigned char bf = static_cast<unsigned char>(std::min(1., b) * 255);
+            int val = 4 * image_width * (image_height - y) + 4 * x;
+            //allot color
+            image[val + 0] = rf;
+            image[val + 1] = gf;
+            image[val + 2] = bf;
+            image[val + 3] = 255;//alpha
+#pragma endregion
+        }
+    }
+}
+
+
+
+
+
 int main()
 {
     //openmp set up
@@ -161,26 +264,30 @@ int main()
     omp_set_nested(1);
     omp_set_num_threads(8);
 
-   // std::cout << omp_get_num_threads();
 	//generate image
 	
     const char* filename = "out1.png";
     std::vector<unsigned char> image;
     const auto aspect_ratio = 1;
-    const int image_width = 512;
+    const int image_width = 128;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     int total = image_width * image_height;
-    const int samples_per_pixel = 20;
+    const int samples_per_pixel = 16;
     const int max_depth = 10;
     //image resizing
     image.resize(image_width * image_height * 4);
 
     // World
+	SDFSphere sphere2(vec3(1,1,0),0.4,Green);
+	SDFSphere sphere(vec3(0,0,0),1,Blue);
+
+    sdfWorld.push_back(make_shared<SDFSphere>(sphere2));
+    sdfWorld.push_back(make_shared<SDFSphere>(sphere));
 
     // Camera
     
-    point3 lookfrom(6, 20, 50);
-    point3 lookat(-4, 4, 0);
+    point3 lookfrom(0, 0, 10);
+    point3 lookat(0, 0, 0);
     vec3 vup(0, 1, 0);
     auto dist_to_focus = 100.0;
     auto aperture = 0.1;
@@ -191,44 +298,61 @@ int main()
 
     
                 
-    int numberOfTiles = 128;
+    int numberOfTiles = 32;
     int th = image_height / numberOfTiles;
     int tw = image_width / numberOfTiles;
     startTime = omp_get_wtime();
+
 	#pragma omp parallel
     {
 		#pragma omp single nowait
         {
-            for (int i = 0; i < numberOfTiles*numberOfTiles; i++) { 
+            for (int i = 0; i < numberOfTiles*numberOfTiles; i++) 
+            { 
 				#pragma omp task
                 {
-                    renderTile(i, numberOfTiles, image_width, image_height, cam, image, samples_per_pixel, max_depth, th,tw);
+                    renderTileRayMarch(i, numberOfTiles, image_width, image_height, cam, image, samples_per_pixel, max_depth, th,tw);
                 }
+				
             }
         }
 	#pragma omp taskwait
     }
     std::cout <<"parallel: " << std::endl << omp_get_wtime() - startTime;
-    	encodeOneStep("output_parallel", image, image_width, image_height);
-
-    
-
+	encodeOneStep("output_parallel", image, image_width, image_height);
+    /*
     startTime = omp_get_wtime();
         for (unsigned y = image_height - 1; y > 0; y--)
         {
             for (unsigned x = 0; x < image_width; x++)
             {
                 color col(0, 0, 0);
+                color raycol = Black;
                 color defaultColor(0.3, 0.5, 0.7);
 
                 for (int s = 0; s < samples_per_pixel; ++s) {
+                    
                     auto u = (x + random_double()) / (image_width - 1);
                     auto v = (y + random_double()) / (image_width - 1);
                     ray ra = cam.get_ray_perspective(u, v);
 
-                    col += ray_color(ra, world, max_depth);
+                    float t = 1;
+                    for (int i = 0; i < 256; i++)
+                    {
+                        vec3 pos = ra.orig + normalise(ra.dir) * t;
+                        float h = findSmallestSDFDistance(pos, sdfWorld);
+                        //float h = sdfWorld.at(0)->DistanceFunction(pos);
 
+                        t += h;
+                        //                    std::cout << std::endl<<t;
+                        if (h < 0.01) { raycol = Red; break; } // std::cout << "found"; break;
+                    }
+                    col += raycol;
+                    //col += ray_color(ra, world, max_depth);
+                
                 }
+                
+
                 //std::cout << std::endl<<col;
 
 #pragma region Image File Color Translation
@@ -257,20 +381,30 @@ int main()
             }
             if (y % 10 == 0)
             {
-               // system("cls");
-               // std::cout << "Progress: " << int(100 * (double(image_height - y) / image_height)) << "%" << std::endl;
+                system("cls");
+                std::cout << "Progress: " << int(100 * (double(image_height - y) / image_height)) << "%" << std::endl;
             }
         }
             std::cout << std::endl <<"Serial: " << omp_get_wtime() - startTime;
-
-/*
-int sum = 0;
-
-*/
-
-	encodeOneStep("output_serial", image, image_width, image_height);
+            */
+	encodeOneStep("ray_marched_output.png", image, image_width, image_height);
     
+    /*
 
+    ray newray(vec3(0, 0, 0), vec3(8, 0, 5));
+    for(int i=0;i<=10;i++)
+    {
+        vec3 pos = newray.at((float)i / 10);
+
+        std::cout << std::endl<<pos;
+        std::cout << std::endl <<"Distance: " << distance(vec3(0, 0, 0), pos);
+    }
+    */
+    //calc ray
+    //march
+    //find distance
+    //if intersect, pixel,
+    //if no intersect, no pixel
     
 	return 0;
 }

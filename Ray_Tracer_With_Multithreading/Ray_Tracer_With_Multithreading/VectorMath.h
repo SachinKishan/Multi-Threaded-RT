@@ -147,6 +147,11 @@ inline vec3 reflect(const vec3& v, const vec3& n) {
     return v - 2 * dot(v, n) * n;
 }
 
+inline vec3 normalise(vec3 a)
+{
+    return a / a.length();
+}
+
 vec3 refract(const vec3& uv, const vec3& n, double etai_over_etat) {
     auto cos_theta = fmin(dot(-uv, n), 1.0);
     vec3 r_out_perp = etai_over_etat * (uv + cos_theta * n);
@@ -179,5 +184,10 @@ public:
     }
 
 };
+
+float distance(vec3 a, vec3 b)
+{
+    return sqrt(pow(a.x() - b.x(), 2) + pow(a.y() - b.y(), 2) + pow(a.z() - b.z(), 2));
+}
 
 #endif

@@ -139,6 +139,7 @@
     <ClInclude Include="Matrix.h" />
     <ClInclude Include="PointLight.h" />
     <ClInclude Include="ray.h" />
+    <ClInclude Include="SDF.h" />
     <ClInclude Include="sphere.h" />
     <ClInclude Include="texture.h" />
     <ClInclude Include="utility.h" />
