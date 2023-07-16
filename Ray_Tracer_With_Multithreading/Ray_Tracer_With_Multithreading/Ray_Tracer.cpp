@@ -163,16 +163,25 @@ void renderTile(int tno, int totaltiles, int image_width, int image_height, came
 
 double findSmallestSDFDistance(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld, shared_ptr<sdf> &hitSDF)
 {
-    double d = infinity;
-    double dOld = d;
-    for (shared_ptr<sdf> df : sdfWorld)
+  
+
+    double minDistance = infinity;
+    hitSDF = nullptr;  // Set the initial value of hitSDF to nullptr
+
+    for (const auto& obj : sdfWorld)
     {
-        d = std::min(d, df->DistanceFunction(p));
-        
-        if (abs(dOld - d) > 0.0001){hitSDF = df;}
+        double d = obj->DistanceFunction(p);
+        if (d < minDistance)
+        {
+            minDistance = d;
+            hitSDF = obj;
+        }
     }
-    return d;
+
+    return minDistance;
 }
+
+
 
 vec3 calcsdfNormal(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld) {
     vec3 e = vec3(1.0, -1.0, 0) * 0.0005;
@@ -202,8 +211,8 @@ void renderTileRayMarch(int tno, int totaltiles, int image_width, int image_heig
             color raycol = Black;
             color defaultColor(0.3, 0.5, 0.7);
 
-            for (int s = 0; s < samples_per_pixel; ++s) {
-
+            for (int s = 0; s < samples_per_pixel; ++s) 
+            {
                 auto u = (x + random_double()) / (image_width - 1);
                 auto v = (y + random_double()) / (image_width - 1);
                 ray ra = cam.get_ray_perspective(u, v);
@@ -215,7 +224,7 @@ void renderTileRayMarch(int tno, int totaltiles, int image_width, int image_heig
                     vec3 pos = ra.orig + normalise(ra.dir) * t;
                 	h = findSmallestSDFDistance(pos, sdfWorld, temp);
                     t += h;
-                    if (h < 0.0001) { raycol = temp->colorOfSDF; break; }
+                    if (h < 0.0001 || h>10) { /*std::cout << "found";*/ raycol = temp->colorOfSDF; break; }
                 }
                 if (h < 0.0001) 
                 {
@@ -224,9 +233,8 @@ void renderTileRayMarch(int tno, int totaltiles, int image_width, int image_heig
                     vec3 light = vec3(1, 2, 3);
                     float dif = clamp(dot(normal, normalise(light - pos)), 0., 1.);
                     dif *= 5. / dot(light - pos, light - pos);
-                    col *= dif;
+                    col += dif*temp->colorOfSDF;
                 }
-                col += raycol;
             }
 
 #pragma region Image File Color Translation
@@ -269,21 +277,33 @@ int main()
     const char* filename = "out1.png";
     std::vector<unsigned char> image;
     const auto aspect_ratio = 1;
-    const int image_width = 128;
+    const int image_width = 256;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     int total = image_width * image_height;
-    const int samples_per_pixel = 16;
+    const int samples_per_pixel = 5;
     const int max_depth = 10;
     //image resizing
     image.resize(image_width * image_height * 4);
 
+  
+
     // World
-	SDFSphere sphere2(vec3(1,1,0),0.4,Green);
-	SDFSphere sphere(vec3(0,0,0),1,Blue);
+    shared_ptr<sdf> sphere2 = make_shared<SDFSphere>(vec3(1, 1, 0), 0.4, Green);
+    shared_ptr<sdf> sphere = make_shared<SDFSphere>(vec3(0, 0, 0), 1, Blue);
+    shared_ptr<sdf> sphere3 = make_shared<SDFSphere>(vec3(-1, 1, 0), 1, Red);
 
-    sdfWorld.push_back(make_shared<SDFSphere>(sphere2));
-    sdfWorld.push_back(make_shared<SDFSphere>(sphere));
+    //sdfWorld.push_back(sphere2);
+    sdfWorld.push_back(sphere);
+    //-sdfWorld.push_back(sphere3);
 
+
+    //shared_ptr<sdf> cSDF = make_shared<combinedSDF>(sphere3, sphere, &SDFSubtract);
+
+
+    //sdfWorld.push_back(cSDF);
+
+
+    
     // Camera
     
     point3 lookfrom(0, 0, 10);
@@ -297,8 +317,8 @@ int main()
 	color defaultColor=Blue;
 
     
-                
-    int numberOfTiles = 32;
+    
+    int numberOfTiles = 128;
     int th = image_height / numberOfTiles;
     int tw = image_width / numberOfTiles;
     startTime = omp_get_wtime();
@@ -319,37 +339,40 @@ int main()
 	#pragma omp taskwait
     }
     std::cout <<"parallel: " << std::endl << omp_get_wtime() - startTime;
-	encodeOneStep("output_parallel", image, image_width, image_height);
+	//encodeOneStep("output_parallel", image, image_width, image_height);
+    
     /*
     startTime = omp_get_wtime();
-        for (unsigned y = image_height - 1; y > 0; y--)
+        for (unsigned y = image_height; y > 0; y--)
         {
             for (unsigned x = 0; x < image_width; x++)
             {
                 color col(0, 0, 0);
-                color raycol = Black;
-                color defaultColor(0.3, 0.5, 0.7);
 
                 for (int s = 0; s < samples_per_pixel; ++s) {
-                    
                     auto u = (x + random_double()) / (image_width - 1);
                     auto v = (y + random_double()) / (image_width - 1);
                     ray ra = cam.get_ray_perspective(u, v);
-
                     float t = 1;
+                    float h = 0;
+                    shared_ptr<sdf> temp;
                     for (int i = 0; i < 256; i++)
                     {
                         vec3 pos = ra.orig + normalise(ra.dir) * t;
-                        float h = findSmallestSDFDistance(pos, sdfWorld);
-                        //float h = sdfWorld.at(0)->DistanceFunction(pos);
-
+                        h = findSmallestSDFDistance(pos, sdfWorld, temp);
                         t += h;
-                        //                    std::cout << std::endl<<t;
-                        if (h < 0.01) { raycol = Red; break; } // std::cout << "found"; break;
+                        if (h < 0.0001 || h>10) { break; }
                     }
-                    col += raycol;
-                    //col += ray_color(ra, world, max_depth);
-                
+                    if (h < 0.0001)
+                    {
+                        vec3 pos = ra.orig + normalise(ra.dir) * t;
+                        vec3 normal = calcsdfNormal(pos, sdfWorld);
+                        vec3 light = vec3(1, 2, 3);
+                        float dif = clamp(dot(normal, normalise(light - pos)), 0., 1.);
+                        dif *= 5. / dot(light - pos, light - pos);
+                        col += dif * temp->colorOfSDF;
+                    }
+
                 }
                 
 
@@ -376,8 +399,6 @@ int main()
                 image[val + 2] = bf;
                 image[val + 3] = 255;//alpha
 #pragma endregion
-
-
             }
             if (y % 10 == 0)
             {
@@ -385,26 +406,12 @@ int main()
                 std::cout << "Progress: " << int(100 * (double(image_height - y) / image_height)) << "%" << std::endl;
             }
         }
-            std::cout << std::endl <<"Serial: " << omp_get_wtime() - startTime;
+            std::cout << std::endl <<"Time: " << omp_get_wtime() - startTime;
             */
 	encodeOneStep("ray_marched_output.png", image, image_width, image_height);
     
-    /*
+    
 
-    ray newray(vec3(0, 0, 0), vec3(8, 0, 5));
-    for(int i=0;i<=10;i++)
-    {
-        vec3 pos = newray.at((float)i / 10);
-
-        std::cout << std::endl<<pos;
-        std::cout << std::endl <<"Distance: " << distance(vec3(0, 0, 0), pos);
-    }
-    */
-    //calc ray
-    //march
-    //find distance
-    //if intersect, pixel,
-    //if no intersect, no pixel
     
 	return 0;
 }
