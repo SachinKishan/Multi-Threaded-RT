@@ -110,8 +110,7 @@ public:
 
     virtual bool scatter(
         const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered,
-        std::vector<PointLight> lights, std::vector<bool> shouldLight
-    ) const override {
+        std::vector<PointLight> lights, std::vector<bool> shouldLight) const override {
         return false;
     }
 
@@ -133,9 +132,11 @@ public:
         std::vector<PointLight> lights, std::vector<bool> shouldLight) const override
     {
         attenuation = albedo;
+        vec3 normal = rec.normal;
+
+        
         return true;
     }
-
 
     color albedo;
 

@@ -65,6 +65,8 @@ public:
         return vec3(random_double(min, max), random_double(min, max), random_double(min, max));
     }
 
+    
+
 public:
     double e[3];
 };
@@ -129,7 +131,10 @@ inline vec3 unit_vector(vec3 v) {
     return v / v.length();
 }
 
-
+inline vec3 absolute(vec3 a)
+{
+    return vec3(abs(a.x()), abs(a.y()), abs(a.z()));
+}
 
 inline vec3 random_in_unit_sphere() {
     while (true) {

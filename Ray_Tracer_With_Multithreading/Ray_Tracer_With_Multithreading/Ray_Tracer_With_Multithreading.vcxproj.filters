@@ -54,6 +54,12 @@
     <ClInclude Include="SDF.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SDF_List.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SDF_Material.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Ray_Tracer.cpp">

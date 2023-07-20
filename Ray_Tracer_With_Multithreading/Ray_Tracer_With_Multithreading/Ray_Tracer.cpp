@@ -20,22 +20,22 @@
 #include "hittable_list.h"
 #include "lodepng.h"
 #include "material.h"
-#include "ray.h"
 #include "sphere.h"
 
 
 #include <omp.h>
 #include <thread>
 
+
+
 #include "SDF.h"
+#include "SDF_List.h"
 
 
-std::vector<shared_ptr<sdf>> sdfWorld;
 
-
-void explainOMP(std::string a)
+void explainOMP(std::string whatIsTheThreadDoing)
 {
-    std::cout << "Thread number: " << omp_get_thread_num()<<" "<<a<<std::endl;
+    std::cout << "Thread number: " << omp_get_thread_num()<<" "<<whatIsTheThreadDoing<<std::endl;
 }
 
 
@@ -49,14 +49,28 @@ void encodeOneStep(const char* filename, std::vector<unsigned char>& image, unsi
 }
 #pragma endregion
 
-
-
 color ray_color(const ray& r, const hittable_list& world, int depth, bool scattering=true) {
     hit_record rec;
     std::vector<bool> shouldLight;
     if (depth <= 0)
         return color(0, 0, 0);
-
+    /// <summary>
+    ///1. if hit
+    ///
+    ///1a. check if scatter from material
+    ///
+    ///1b. final col= attenuation(color obtained from object ray has just hit) + perform new ray bounce with new ray
+    ///
+    ///1c. then return final col
+    ///
+    ///2. else if nothing is hit at all, return the default color
+    ///
+    /// </summary>
+    /// <param name="r"></param>
+    /// <param name="world"></param>
+    /// <param name="depth"></param>
+    /// <param name="scattering"></param>
+    /// <returns></returns>
     if (world.hit(r, 0.001, infinity, rec)) {
         ray scattered;
         color attenuation;
@@ -64,7 +78,7 @@ color ray_color(const ray& r, const hittable_list& world, int depth, bool scatte
             for (PointLight l : world.lights)
             {
             	hit_record shadowRec;
-                ray shadow_ray(rec.p + (rec.normal * 1e-4), l.lightDirection);
+                ray shadow_ray(rec.p + (rec.normal * 1e-4), l.lightPosition);
 
                 if (world.hit(shadow_ray, 0.001, infinity, shadowRec))
                 {
@@ -83,11 +97,11 @@ color ray_color(const ray& r, const hittable_list& world, int depth, bool scatte
             }
             return color(0, 0, 0);
         }
+
     //vec3 unit_direction = unit_vector(r.direction());
     //auto t = 0.5 * (unit_direction.y() + 1.0);
     return color(0.5, 0.7, 1.0);
 }
-
 
 hittable_list random_scene() {
     hittable_list world;
@@ -181,6 +195,14 @@ double findSmallestSDFDistance(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld, sh
     return minDistance;
 }
 
+double findLargestSDFDistance(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld)
+{
+    double d = 0;
+    for (const auto& obj : sdfWorld)
+        d = std::max(d, obj->DistanceFunction(p));
+    
+    return d;
+}
 
 
 vec3 calcsdfNormal(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld) {
@@ -198,11 +220,62 @@ vec3 calcsdfNormal(vec3 p, std::vector<shared_ptr<sdf>> sdfWorld) {
         d * findSmallestSDFDistance(p + d, sdfWorld,dummy));
 }
 
-void renderTileRayMarch(int tno, int totaltiles, int image_width, int image_height, camera cam, std::vector<unsigned char>& image, int samples_per_pixel, int max_depth, int th, int tw)
+
+double largestDistance;
+color ray_color_marching(ray ra,SDF_List sdfWorld,int depth)
 {
+    color defaultColor=sdfWorld.defaultColor;
+    if (depth <= 0)return defaultColor;
+    float t = 1;
+    float h = 0;
+    color attenuation;
+    ray scattered;
+    color col=Black;
+    color raycol = White;
+    SDF_hit_record rec;
+    shared_ptr<sdf> temp;
+    for (int i = 0; i < 256; i++)
+    {
+        vec3 pos = ra.orig + normalise(ra.dir) * t;
+        h = findSmallestSDFDistance(pos, sdfWorld.SDFObjects, temp);
+        t += h;
+        if (!temp)return defaultColor;
+        else if (h < 0.0001)//this means an intersection has happened
+        {
+            rec.normal = calcsdfNormal(pos, sdfWorld.SDFObjects);
+            rec.p = pos;
+            rec.t = t - h;
+            rec.sdf_ptr = temp;
+            color emitted=rec.sdf_ptr->material->emitted(ra,rec,rec.p);
+            if (!rec.sdf_ptr->material->scatter(ra, rec, attenuation, scattered,sdfWorld.lights))
+            {
+                //depth = 0;
+                //explainOMP("light Found");
+
+                return emitted;
+            	return defaultColor;
+                //raycol = attenuation;
+            }
+            raycol= emitted + attenuation * ray_color_marching(scattered, sdfWorld, depth - 1);
+            break;
+        }
+         
+    }
+    if (h < 0.0001) //apply material
+    {
+        col = raycol;
+    }
+    return col;
+}
+
+
+void renderTileRayMarch(int tno, int totaltiles, int image_width, int image_height, camera cam, std::vector<unsigned char>& image, int samples_per_pixel, int max_depth, int th, int tw, SDF_List sdfWorld)
+{
+
     int t = tno;//tile number
     int ytno = t / totaltiles + 1;
     int xtno = t % totaltiles + 1;
+
     for (unsigned y = ytno * th; y > (ytno - 1) * th; y--)
     {
         for (unsigned x = (xtno - 1) * tw; x < tw * xtno; x++)
@@ -216,25 +289,7 @@ void renderTileRayMarch(int tno, int totaltiles, int image_width, int image_heig
                 auto u = (x + random_double()) / (image_width - 1);
                 auto v = (y + random_double()) / (image_width - 1);
                 ray ra = cam.get_ray_perspective(u, v);
-                float t = 1;
-                float h = 0;
-                shared_ptr<sdf> temp;
-                for (int i = 0; i < 256; i++)
-                {
-                    vec3 pos = ra.orig + normalise(ra.dir) * t;
-                	h = findSmallestSDFDistance(pos, sdfWorld, temp);
-                    t += h;
-                    if (h < 0.0001 || h>10) { /*std::cout << "found";*/ raycol = temp->colorOfSDF; break; }
-                }
-                if (h < 0.0001) 
-                {
-                    vec3 pos = ra.orig + normalise(ra.dir) * t;
-                    vec3 normal = calcsdfNormal(pos, sdfWorld);
-                    vec3 light = vec3(1, 2, 3);
-                    float dif = clamp(dot(normal, normalise(light - pos)), 0., 1.);
-                    dif *= 5. / dot(light - pos, light - pos);
-                    col += dif*temp->colorOfSDF;
-                }
+                col += ray_color_marching(ra, sdfWorld,max_depth);
             }
 
 #pragma region Image File Color Translation
@@ -277,36 +332,79 @@ int main()
     const char* filename = "out1.png";
     std::vector<unsigned char> image;
     const auto aspect_ratio = 1;
-    const int image_width = 256;
+    const int image_width = 1024;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     int total = image_width * image_height;
-    const int samples_per_pixel = 5;
-    const int max_depth = 10;
+    const int samples_per_pixel = 4;
+    const int max_depth = 2;
     //image resizing
     image.resize(image_width * image_height * 4);
 
   
 
     // World
-    shared_ptr<sdf> sphere2 = make_shared<SDFSphere>(vec3(1, 1, 0), 0.4, Green);
-    shared_ptr<sdf> sphere = make_shared<SDFSphere>(vec3(0, 0, 0), 1, Blue);
-    shared_ptr<sdf> sphere3 = make_shared<SDFSphere>(vec3(-1, 1, 0), 1, Red);
-
-    //sdfWorld.push_back(sphere2);
-    sdfWorld.push_back(sphere);
-    //-sdfWorld.push_back(sphere3);
 
 
-    //shared_ptr<sdf> cSDF = make_shared<combinedSDF>(sphere3, sphere, &SDFSubtract);
+
+    shared_ptr<SDF_Material> basicmat1 = make_shared<SDF_material_basic_color>(Red,1,1,64);
+    shared_ptr<SDF_Material> basicmat2 = make_shared<SDF_material_basic_color>(Blue,1,1,32);
+    shared_ptr<SDF_Material> basicmat3 = make_shared<SDF_material_basic_color>(Green,1,1,32);
+    shared_ptr<SDF_Material> combinedmat = make_shared<SDF_Material_Combined>(basicmat1, basicmat2);
+    shared_ptr<sdf> sphere1 = make_shared<SDFSphere>(vec3(-0.7, -1000, 0), 1000, basicmat3);
+    shared_ptr<sdf> sphere2 = make_shared<SDFSphere>(vec3(0, 1, 0), 0.9, basicmat2);
+    shared_ptr<sdf> sphere3 = make_shared<SDFSphere>(vec3(0, 0.7, 0), 1.1, basicmat1);
+    shared_ptr<sdf> sphere4 = make_shared<SDFSphere>(vec3(1, 0.7, 0), 1.4, basicmat2);
+    shared_ptr<SDF_Material> combinedmat2 = make_shared<SDF_Material_Combined>(basicmat1, basicmat2);
+    shared_ptr<SDF_Material> combinedmat3 = make_shared<SDF_Material_Combined>(combinedmat, combinedmat2);
 
 
-    //sdfWorld.push_back(cSDF);
+
+    //light test
+    shared_ptr<SDF_Material> lightMaterial = make_shared<SDF_material_emissive>(7,White);
+    shared_ptr<sdf> glowingOrb = make_shared<SDFSphere>(vec3(0, 15.0, 0), 7, lightMaterial);
 
 
+
+
+    /////////////
+    
+  //  sdfWorld.push_back(sphere2);
+	shared_ptr<sdf> cSDF3 = make_shared<combinedSDF>(sphere2,sphere1 , &SDFUnion,combinedmat);
+	shared_ptr<sdf> cSDF4 = make_shared<combinedSDF>(sphere3,sphere4 , &SDFUnion,combinedmat2);
+	shared_ptr<sdf> cSDF5 = make_shared<combinedSDF>(cSDF3,cSDF4 , &SDFUnion,combinedmat3);
+
+	//sdfWorld.push_back(sphere1);
+
+
+    shared_ptr<sdf> box1 = make_shared<SDFBox>(vec3(0,1,0),vec3(1,1,1),basicmat1);
+    shared_ptr<sdf> box2 = make_shared<SDFBox>(vec3(0.5,0.5,0.5),vec3(1,1,0.75),basicmat1);
+    shared_ptr<sdf> box3 = make_shared<SDFBox>(vec3(-0.5,-0.5,-0.5),vec3(1,0.5,2),basicmat1);
+    shared_ptr<sdf> box4 = make_shared<SDFBox>(vec3(0.5,1.2,0.5),vec3(1,1.2,1),basicmat1);
+    shared_ptr<sdf> boxCombined1 = make_shared<combinedSDF>(box1, box2, &SDFUnion, combinedmat);
+    shared_ptr<sdf> boxCombined2 = make_shared<combinedSDF>(box1, box4, &SDFUnion, combinedmat);
+
+    shared_ptr<sdf> boxCombined3 = make_shared<combinedSDF>(boxCombined1, boxCombined2, &SDFUnion, combinedmat2);
+    shared_ptr<sdf> boxCombined4 = make_shared<combinedSDF>(box1, sphere1, &SDFUnion, combinedmat);
+
+	//sdfWorld.push_back(boxCombined4);
+
+
+    color defaultColor(0.3, 0.5, 0.7);
+
+    SDF_List world(Black);
+    //world.add(box1);
+
+    world.add(sphere1);
+    world.add(sphere2);
+    world.add(glowingOrb);
+
+    PointLight l(15, vec3(1, 0, 0), White);
+    //world.lights.push_back(l);
+
+    largestDistance = findLargestSDFDistance(vec3(0, 0, 0), world.SDFObjects);
     
     // Camera
-    
-    point3 lookfrom(0, 0, 10);
+    point3 lookfrom(25,5,25);
     point3 lookat(0, 0, 0);
     vec3 vup(0, 1, 0);
     auto dist_to_focus = 100.0;
@@ -314,7 +412,6 @@ int main()
 
     camera cam(lookfrom, lookat, vup, 20, aspect_ratio, aperture, dist_to_focus);
 
-	color defaultColor=Blue;
 
     
     
@@ -322,7 +419,7 @@ int main()
     int th = image_height / numberOfTiles;
     int tw = image_width / numberOfTiles;
     startTime = omp_get_wtime();
-
+    std::atomic<int> counter=0;
 	#pragma omp parallel
     {
 		#pragma omp single nowait
@@ -331,9 +428,13 @@ int main()
             { 
 				#pragma omp task
                 {
-                    renderTileRayMarch(i, numberOfTiles, image_width, image_height, cam, image, samples_per_pixel, max_depth, th,tw);
+                    renderTileRayMarch(i, numberOfTiles, image_width, image_height, cam, image, samples_per_pixel, max_depth, th,tw, world);
+                	//counter++;
                 }
-				
+                //system("cls");
+                //std::cout << "Progress: " << int(100 * (double(counter) / (numberOfTiles*numberOfTiles))) << "%" << std::endl;
+               // explainOMP("tile rendered");
+
             }
         }
 	#pragma omp taskwait

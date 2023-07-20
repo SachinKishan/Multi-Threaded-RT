@@ -34,7 +34,7 @@ bool sphere:: hit(const ray& r, double t_min, double t_max, hit_record& rec) con
 
     auto root1 = (-half_b - sqrtd) / a;
     auto root2 = (-half_b + sqrtd) / a;
-    if (root1 == root2)rec.hit_one_point = true;
+    //if (root1 == root2)rec.hit_one_point = true;
     auto root = root1;
     if (root < t_min || t_max < root) {
         root = root2;
