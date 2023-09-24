@@ -99,9 +99,9 @@ hittable_list random_scene() {
     world.lights.push_back(l1);
     //world.lights.push_back(l2);
 
-    double diff=0.35;
-    double spec=128;
-    auto brown = make_shared<lambert>(Brown, diff, spec);
+    double diff=1;
+    double spec=2;
+    auto brown = make_shared<lambert>(Blue, diff, spec);
 
     world.add(make_shared<sphere>(point3(-4, 4, 0), 4, brown));
 
@@ -209,7 +209,7 @@ int main()
 	#pragma omp taskwait
     }
     std::cout <<"parallel: " << std::endl << omp_get_wtime() - startTime;
-    	encodeOneStep("output_parallel", image, image_width, image_height);
+    	encodeOneStep("output_parallel.png", image, image_width, image_height);
 
     
 
@@ -268,7 +268,7 @@ int sum = 0;
 
 */
 
-	encodeOneStep("output_serial", image, image_width, image_height);
+	encodeOneStep("output_serial.png", image, image_width, image_height);
     
 
     
