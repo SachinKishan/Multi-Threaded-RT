@@ -10,6 +10,14 @@
 ///Objects
 ///Scene manipulation
 ///
+///
+///
+
+#define TRACY_ENABLE
+
+#include "include/public/tracy/Tracy.hpp"
+
+
 #include<stdlib.h>
 #include "VectorMath.h"
 #include "Matrix.h"
